@@ -13,8 +13,8 @@ export default function AdminPage() {
   const [msg, setMsg] = useState(''); const [error, setError] = useState('');
   const cargar = async () => { try { const [l,m,t,p,tr,n] = await Promise.all([api.lineas(), api.micros(), api.tarifas(), api.pendientes(), api.trasbordos(), api.notificaciones()]); setLineas(l); setMicros(m); setTarifas(t); setPendientes(p); setTrasbordos(tr); setNotifs(n); if(!form.lineaId && l[0]) setForm(f=>({...f,lineaId:l[0].id})); } catch(e:any){ setError(e.message); } };
   useEffect(() => { void cargar(); }, []);
-  const run = async (fn:()=>Promise<any>, ok:string) => { setError(''); setMsg(''); try { await fn(); setMsg(ok); await cargar(); } catch(e:any){ setError(e.message); } };
-  const guardarMicro = async (e: React.FormEvent) => { e.preventDefault(); await run(() => editId ? api.actualizarMicro(editId, form) : api.crearMicro(form), editId ? 'Micro actualizado' : 'Micro creado'); setEditId(null); setForm({ ...empty, lineaId: lineas[0]?.id ?? 1 }); };
+  const run = async (fn:()=>Promise<any>, ok:string) => { setError(''); setMsg(''); try { await fn(); setMsg(ok); await cargar(); return true; } catch(e:any){ setError(e.message); return false; } };
+  const guardarMicro = async (e: React.FormEvent) => { e.preventDefault(); const ok = await run(() => editId ? api.actualizarMicro(editId, form) : api.crearMicro(form), editId ? 'Micro actualizado' : 'Micro creado'); if (ok) { setEditId(null); setForm({ ...empty, lineaId: lineas[0]?.id ?? 1 }); } };
   return <RoleGuard roles={['ADMIN']}><main className="contenedor"><section className="seccion"><h1>Panel Administrador</h1>
     {error && <div className="alerta error">{error}</div>} {msg && <div className="alerta exito">{msg}</div>}
     <h2>Micros</h2>
