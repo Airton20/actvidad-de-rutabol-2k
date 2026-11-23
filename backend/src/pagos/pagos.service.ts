@@ -8,67 +8,72 @@ export class PagosService {
   constructor(private readonly db: DatabaseService) { }
 
   async procesarPago(usuarioId: number, dto: ProcesarPagoDto): Promise<Pago> {
-    const micros = await this.db.query<{ id: number; capacidad: number; pasajeros_actuales: number }>(
-      'SELECT id, capacidad, pasajeros_actuales FROM micros WHERE id = $1',
-      [dto.microId]
-    );
-    if (!micros[0]) throw new NotFoundException('El micro indicado no existe');
-    const micro = micros[0];
-    if (micro.pasajeros_actuales >= micro.capacidad) {
-      throw new BadRequestException('El micro está en su capacidad máxima autorizada');
-    }
-
-    const usuarios = await this.db.query<{ categoria: string; estudiante_validado: boolean }>(
-      'SELECT categoria, estudiante_validado FROM usuarios WHERE id = $1',
-      [usuarioId]
-    );
-    const usuario = usuarios[0] || { categoria: 'GENERAL', estudiante_validado: false };
-
-    const trasbordosRecientes = await this.db.query<{ id: number }>(
-      `SELECT t.id FROM trasbordos t
-       JOIN pagos p ON (p.micro_id = t.micro_origen_id AND p.usuario_id = $1)
-       WHERE t.micro_destino_id = $2
-         AND p.fecha_pago >= NOW() - INTERVAL '2 hours'
-       ORDER BY t.id DESC LIMIT 1`,
-      [usuarioId, dto.microId]
-    );
-
-    let monto = 2.00;
-    let esTrasbordoGratuito = false;
-
-    if (trasbordosRecientes.length > 0) {
-      monto = 0.00;
-      esTrasbordoGratuito = true;
-    } else {
-      let cat = usuario.categoria;
-      if ((cat === 'UNIVERSITARIO' || cat === 'ESCOLAR') && !usuario.estudiante_validado) {
-        cat = 'GENERAL';
-      }
-      const tarifas = await this.db.query<{ monto: number }>(
-        'SELECT monto::float AS monto FROM tarifas WHERE categoria = $1',
-        [cat]
+    return this.db.withTransaction(async (query) => {
+      const micros = await query<{ id: number; capacidad: number; pasajeros_actuales: number }>(
+        'SELECT id, capacidad, pasajeros_actuales FROM micros WHERE id = $1 FOR UPDATE',
+        [dto.microId]
       );
-      if (tarifas[0]) monto = tarifas[0].monto;
-    }
+      if (!micros[0]) throw new NotFoundException('El micro indicado no existe');
+      const micro = micros[0];
+      if (micro.pasajeros_actuales >= micro.capacidad) {
+        throw new BadRequestException('El micro está en su capacidad máxima autorizada');
+      }
 
-    const ultimos4 = dto.numeroTarjeta.slice(-4);
-    const codigoTicket = `TCK-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
+      const usuarios = await query<{ categoria: string; estudiante_validado: boolean }>(
+        'SELECT categoria, estudiante_validado FROM usuarios WHERE id = $1',
+        [usuarioId]
+      );
+      const usuario = usuarios[0] || { categoria: 'GENERAL', estudiante_validado: false };
 
-    const rows = await this.db.query<Pago>(
-      `INSERT INTO pagos (usuario_id, micro_id, monto, metodo, codigo_ticket, estado, es_trasbordo_gratuito)
-       VALUES ($1, $2, $3, $4, $5, 'EXITOSO', $6)
-       RETURNING id, usuario_id AS "usuarioId", micro_id AS "microId", monto::float AS monto,
-                 metodo, codigo_ticket AS "codigoTicket", estado,
-                 es_trasbordo_gratuito AS "esTrasbordoGratuito", fecha_pago AS "fechaPago"`,
-      [usuarioId, dto.microId, monto, `TARJETA_CREDITO (**** ${ultimos4})`, codigoTicket, esTrasbordoGratuito]
-    );
+      const trasbordosRecientes = await query<{ id: number }>(
+        `SELECT t.id FROM trasbordos t
+         JOIN pagos p ON (p.micro_id = t.micro_origen_id AND p.usuario_id = $1)
+         WHERE t.micro_destino_id = $2
+           AND p.fecha_pago >= NOW() - INTERVAL '2 hours'
+         ORDER BY t.id DESC LIMIT 1`,
+        [usuarioId, dto.microId]
+      );
 
-    await this.db.query(
-      'UPDATE micros SET pasajeros_actuales = pasajeros_actuales + 1 WHERE id = $1',
-      [dto.microId]
-    );
+      let monto = 2.00;
+      let esTrasbordoGratuito = false;
 
-    return rows[0];
+      if (trasbordosRecientes.length > 0) {
+        monto = 0.00;
+        esTrasbordoGratuito = true;
+      } else {
+        let cat = usuario.categoria;
+        if ((cat === 'UNIVERSITARIO' || cat === 'ESCOLAR') && !usuario.estudiante_validado) {
+          cat = 'GENERAL';
+        }
+        const tarifas = await query<{ monto: number }>(
+          'SELECT monto::float AS monto FROM tarifas WHERE categoria = $1',
+          [cat]
+        );
+        if (tarifas[0]) monto = tarifas[0].monto;
+      }
+
+      const claim = await query<{ id: number }>(
+        'UPDATE micros SET pasajeros_actuales = pasajeros_actuales + 1 WHERE id = $1 AND pasajeros_actuales < capacidad RETURNING id',
+        [dto.microId]
+      );
+      if (!claim[0]) {
+        throw new BadRequestException('El micro está en su capacidad máxima autorizada');
+      }
+
+      const ultimos4 = dto.numeroTarjeta.slice(-4);
+      const codigoTicket = `TCK-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
+
+      const rows = await query<Pago>(
+        `INSERT INTO pagos (usuario_id, micro_id, monto, metodo, codigo_ticket, estado, es_trasbordo_gratuito)
+         VALUES ($1, $2, $3, $4, $5, 'EXITOSO', $6)
+         RETURNING id, usuario_id AS "usuarioId", micro_id AS "microId", monto::float AS monto,
+                   metodo, codigo_ticket AS "codigoTicket", estado,
+                   es_trasbordo_gratuito AS "esTrasbordoGratuito", fecha_pago AS "fechaPago"`,
+        [usuarioId, dto.microId, monto, `TARJETA_CREDITO (**** ${ultimos4})`, codigoTicket, esTrasbordoGratuito]
+      );
+
+      return rows[0];
+    });
   }
 
   async historialUsuario(usuarioId: number): Promise<Pago[]> {

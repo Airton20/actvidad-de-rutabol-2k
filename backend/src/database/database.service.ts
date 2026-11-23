@@ -5,6 +5,7 @@ import {
 
 import {
   Pool,
+  PoolClient,
   QueryResultRow
 } from 'pg';
 
@@ -39,6 +40,27 @@ export class DatabaseService implements OnModuleDestroy {
     );
 
     return result.rows;
+  }
+
+  async withTransaction<T>(
+    work: (query: <R extends QueryResultRow>(sql: string, params?: unknown[]) => Promise<R[]>) => Promise<T>
+  ): Promise<T> {
+    const client: PoolClient = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const txQuery = async <R extends QueryResultRow>(sql: string, params: unknown[] = []): Promise<R[]> => {
+        const result = await client.query<R>(sql, params);
+        return result.rows;
+      };
+      const result = await work(txQuery);
+      await client.query('COMMIT');
+      return result;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async onModuleDestroy(): Promise<void> {

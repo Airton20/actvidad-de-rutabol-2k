@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import session = require('express-session');
 import connectPgSimple = require('connect-pg-simple');
 import { AppModule } from './app.module';
@@ -11,9 +12,14 @@ async function bootstrap() {
   const secret = process.env.SESSION_SECRET;
   if (!secret || secret.length < 32) throw new Error('SESSION_SECRET debe tener al menos 32 caracteres');
 
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const database = app.get(DatabaseService);
   await database.query('SELECT 1');
+
+  const isProd = process.env.NODE_ENV === 'production';
+  if (isProd) {
+    app.set('trust proxy', 1);
+  }
 
   app.setGlobalPrefix('api');
   app.enableCors({
@@ -32,7 +38,7 @@ async function bootstrap() {
     pool: database.getPool(),
     createTableIfMissing: true
     }),
-    cookie: { httpOnly: true, sameSite: 'lax', secure: false, maxAge: 60 * 60 * 1000 },
+    cookie: { httpOnly: true, sameSite: 'lax', secure: isProd, maxAge: 60 * 60 * 1000 },
   }));
 
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));

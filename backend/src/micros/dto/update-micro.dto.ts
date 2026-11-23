@@ -17,9 +17,6 @@ export class UpdateMicroDto {
   @IsOptional() @IsInt() @Min(1)
   lineaId?: number;
 
-  @IsOptional() @IsInt() @Min(0)
-  pasajerosActuales?: number;
-
   @IsOptional() @IsNumber()
   latitud?: number;
 

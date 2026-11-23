@@ -12,54 +12,64 @@ export class TrasbordosService {
       throw new BadRequestException('El micro de origen y destino no pueden ser el mismo');
     }
 
-    const mOrigen = await this.db.query<{ id: number; interno: string; capacidad: number; pasajeros_actuales: number }>(
-      'SELECT id, interno, capacidad, pasajeros_actuales FROM micros WHERE id = $1',
-      [dto.microOrigenId]
-    );
-    if (!mOrigen[0]) throw new NotFoundException('Micro de origen no encontrado');
-
-    const mDestino = await this.db.query<{ id: number; interno: string; capacidad: number; pasajeros_actuales: number }>(
-      'SELECT id, interno, capacidad, pasajeros_actuales FROM micros WHERE id = $1',
-      [dto.microDestinoId]
-    );
-    if (!mDestino[0]) throw new NotFoundException('Micro de destino no encontrado');
-
-    const origen = mOrigen[0];
-    const destino = mDestino[0];
-    const cantidad = dto.cantidadPasajeros ?? origen.pasajeros_actuales;
-
-    if (destino.pasajeros_actuales + cantidad > destino.capacidad) {
-      throw new BadRequestException(
-        `El micro de destino (Interno ${destino.interno}) no tiene suficiente capacidad para recibir ${cantidad} pasajeros`
+    return this.db.withTransaction(async (query) => {
+      const [firstId, secondId] = [dto.microOrigenId, dto.microDestinoId].sort((a, b) => a - b);
+      const locked = await query<{ id: number; interno: string; capacidad: number; pasajeros_actuales: number }>(
+        'SELECT id, interno, capacidad, pasajeros_actuales FROM micros WHERE id IN ($1, $2) ORDER BY id FOR UPDATE',
+        [firstId, secondId]
       );
-    }
 
-    await this.db.query('UPDATE micros SET pasajeros_actuales = GREATEST(0, pasajeros_actuales - $1) WHERE id = $2', [cantidad, origen.id]);
-    await this.db.query('UPDATE micros SET pasajeros_actuales = pasajeros_actuales + $1 WHERE id = $2', [cantidad, destino.id]);
+      const origen = locked.find((m) => m.id === dto.microOrigenId);
+      const destino = locked.find((m) => m.id === dto.microDestinoId);
+      if (!origen) throw new NotFoundException('Micro de origen no encontrado');
+      if (!destino) throw new NotFoundException('Micro de destino no encontrado');
 
-    if (dto.motivo === 'FALLA_MECANICA' || dto.motivo === 'EMERGENCIA') {
-      await this.db.query("UPDATE micros SET estado = 'EMERGENCIA' WHERE id = $1", [origen.id]);
-    }
+      const cantidad = dto.cantidadPasajeros ?? origen.pasajeros_actuales;
 
-    const rows = await this.db.query<Trasbordo>(
-      `INSERT INTO trasbordos (micro_origen_id, micro_destino_id, motivo, cantidad_pasajeros, estado)
-       VALUES ($1, $2, $3, $4, 'COMPLETADO')
-       RETURNING id, micro_origen_id AS "microOrigenId", micro_destino_id AS "microDestinoId",
-                 motivo, cantidad_pasajeros AS "cantidadPasajeros", estado, fecha`,
-      [origen.id, destino.id, dto.motivo, cantidad]
-    );
+      if (destino.pasajeros_actuales + cantidad > destino.capacidad) {
+        throw new BadRequestException(
+          `El micro de destino (Interno ${destino.interno}) no tiene suficiente capacidad para recibir ${cantidad} pasajeros`
+        );
+      }
 
-    await this.db.query(
-      `INSERT INTO notificaciones (micro_id, titulo, mensaje, tipo)
-       VALUES ($1, $2, $3, 'TRASBORDO')`,
-      [
-        destino.id,
-        `Trasbordo (${dto.motivo})`,
-        `Se han transferido ${cantidad} pasajeros del interno ${origen.interno} al interno ${destino.interno}. Los boletos siguen vigentes sin costo adicional.`
-      ]
-    );
+      await query(
+        'UPDATE micros SET pasajeros_actuales = GREATEST(0, pasajeros_actuales - $1) WHERE id = $2',
+        [cantidad, origen.id]
+      );
+      const destinoClaim = await query<{ id: number }>(
+        'UPDATE micros SET pasajeros_actuales = pasajeros_actuales + $1 WHERE id = $2 AND pasajeros_actuales + $1 <= capacidad RETURNING id',
+        [cantidad, destino.id]
+      );
+      if (!destinoClaim[0]) {
+        throw new BadRequestException(
+          `El micro de destino (Interno ${destino.interno}) no tiene suficiente capacidad para recibir ${cantidad} pasajeros`
+        );
+      }
 
-    return rows[0];
+      if (dto.motivo === 'FALLA_MECANICA' || dto.motivo === 'EMERGENCIA') {
+        await query("UPDATE micros SET estado = 'EMERGENCIA' WHERE id = $1", [origen.id]);
+      }
+
+      const rows = await query<Trasbordo>(
+        `INSERT INTO trasbordos (micro_origen_id, micro_destino_id, motivo, cantidad_pasajeros, estado)
+         VALUES ($1, $2, $3, $4, 'COMPLETADO')
+         RETURNING id, micro_origen_id AS "microOrigenId", micro_destino_id AS "microDestinoId",
+                   motivo, cantidad_pasajeros AS "cantidadPasajeros", estado, fecha`,
+        [origen.id, destino.id, dto.motivo, cantidad]
+      );
+
+      await query(
+        `INSERT INTO notificaciones (micro_id, titulo, mensaje, tipo)
+         VALUES ($1, $2, $3, 'TRASBORDO')`,
+        [
+          destino.id,
+          `Trasbordo (${dto.motivo})`,
+          `Se han transferido ${cantidad} pasajeros del interno ${origen.interno} al interno ${destino.interno}. Los boletos siguen vigentes sin costo adicional.`
+        ]
+      );
+
+      return rows[0];
+    });
   }
 
   async findAll(): Promise<Trasbordo[]> {
