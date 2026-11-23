@@ -27,8 +27,12 @@ export class AuthService implements OnModuleInit {
   constructor(private readonly db: DatabaseService) {}
 
   async onModuleInit(): Promise<void> {
-    const username = process.env.ADMIN_USERNAME || 'admin';
-    const password = process.env.ADMIN_PASSWORD || 'Admin123456!';
+    const username = process.env.ADMIN_USERNAME;
+    const password = process.env.ADMIN_PASSWORD;
+    if (!username || !password) {
+      console.warn('ADMIN_USERNAME/ADMIN_PASSWORD no configurados; se omite bootstrap de admin');
+      return;
+    }
     try {
       const hashSeguro = await hash(password, 12);
       await this.db.query(
@@ -38,7 +42,7 @@ export class AuthService implements OnModuleInit {
         [username, hashSeguro],
       );
     } catch {
-      // Ignorar si la base de datos no estÃ¡ levantada al arrancar
+      // Ignorar si la base de datos no está levantada al arrancar
     }
   }
 
@@ -46,12 +50,12 @@ export class AuthService implements OnModuleInit {
     const categoria = dto.categoria || 'GENERAL';
     if (categoria === 'UNIVERSITARIO') {
       if (!dto.emailUpds || !dto.emailUpds.toLowerCase().endsWith('@upds.edu.bo')) {
-        throw new BadRequestException('Para categorÃ­a universitaria, el correo debe terminar en @upds.edu.bo');
+        throw new BadRequestException('Para categoría universitaria, el correo debe terminar en @upds.edu.bo');
       }
-      if (!dto.codEst) throw new BadRequestException('Para categorÃ­a universitaria, debe registrar su cÃ³digo de estudiante codEst');
+      if (!dto.codEst) throw new BadRequestException('Para categoría universitaria, debe registrar su código de estudiante codEst');
     }
     if (categoria === 'ESCOLAR' && !dto.codigoRude) {
-      throw new BadRequestException('Para categorÃ­a escolar, debe registrar su cÃ³digo RUDE');
+      throw new BadRequestException('Para categoría escolar, debe registrar su código RUDE');
     }
 
     const hashPassword = await hash(dto.password, 10);
@@ -70,7 +74,7 @@ export class AuthService implements OnModuleInit {
       const u = rows[0];
       return { id: u.id, username: u.username, rol: u.rol, nombreCompleto: u.nombre_completo, categoria: u.categoria, estudianteValidado: u.estudiante_validado };
     } catch (error: any) {
-      if (error?.code === '23505') throw new ConflictException('El nombre de usuario ya estÃ¡ registrado');
+      if (error?.code === '23505') throw new ConflictException('El nombre de usuario ya está registrado');
       throw error;
     }
   }
@@ -94,7 +98,7 @@ export class AuthService implements OnModuleInit {
       [id],
     );
     const u = rows[0];
-    if (!u) throw new UnauthorizedException('No existe sesiÃ³n activa');
+    if (!u) throw new UnauthorizedException('No existe sesión activa');
     return { id: u.id, username: u.username, rol: u.rol, nombreCompleto: u.nombre_completo, categoria: u.categoria, estudianteValidado: u.estudiante_validado };
   }
 
@@ -109,6 +113,6 @@ export class AuthService implements OnModuleInit {
   async validarEstudiante(id: number, aprobado: boolean): Promise<{ mensaje: string }> {
     const rows = await this.db.query('UPDATE usuarios SET estudiante_validado = $1 WHERE id = $2 RETURNING id', [aprobado, id]);
     if (!rows[0]) throw new NotFoundException('Usuario no encontrado');
-    return { mensaje: aprobado ? 'Estudiante validado con Ã©xito' : 'Estudiante revocado/rechazado' };
+    return { mensaje: aprobado ? 'Estudiante validado con éxito' : 'Estudiante revocado/rechazado' };
   }
 }

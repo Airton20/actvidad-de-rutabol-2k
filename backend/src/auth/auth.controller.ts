@@ -28,7 +28,7 @@ export class AuthController {
 
   @Get('me')
   async me(@Req() req: Request) {
-    if (!req.session?.usuarioId) throw new UnauthorizedException('No existe sesiÃ³n activa');
+    if (!req.session?.usuarioId) throw new UnauthorizedException('No existe sesión activa');
     return this.auth.obtenerUsuario(req.session.usuarioId);
   }
 
@@ -36,7 +36,7 @@ export class AuthController {
   async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     await new Promise<void>((resolve, reject) => req.session.destroy((err) => (err ? reject(err) : resolve())));
     res.clearCookie('micros.sid', { path: '/', httpOnly: true, sameSite: 'lax', secure: false });
-    return { mensaje: 'SesiÃ³n finalizada' };
+    return { mensaje: 'Sesión finalizada' };
   }
 
   @Get('pendientes')
