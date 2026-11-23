@@ -1,11 +1,14 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import { SessionProvider } from '@/components/SessionProvider';
+import { Nav } from '@/components/Nav';
 
-export const metadata: Metadata = {
-  title: 'Micros SCZ | Tecnología Web I',
-  description: 'Catálogo de líneas y gestión de micros con Next.js y NestJS.',
-};
+export const metadata: Metadata = { title: 'Rutabol SCZ', description: 'Sistema Inteligente de Transporte Urbano' };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="es"><body>{children}</body></html>;
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="es">
+      <body><SessionProvider><Nav />{children}</SessionProvider></body>
+    </html>
+  );
 }
