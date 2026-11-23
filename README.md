@@ -1,6 +1,6 @@
 # RUTABOL-SCZ — Sistema Inteligente de Transporte Urbano
 
-Sistema web integral para la gestión y monitoreo del transporte público de Santa Cruz de la Sierra. La solución permite a los pasajeros explorar líneas, localizar micros en tiempo real en un radio de 5 km, adquirir boletos electrónicos mediante pasarela de pago y gestionar trasbordos sin cobro duplicado; a los conductores administrar su capacidad operativa; y a los administradores supervisar la flota y validar credenciales estudiantiles.
+Sistema web integral para la gestión y monitoreo del transporte público de Santa Cruz de la Sierra. La solución permite a los pasajeros explorar líneas, localizar micros en un radio configurable (5 km por defecto), adquirir boletos electrónicos, gestionar trasbordos sin cobro duplicado y recibir notificaciones; a los conductores administrar operación en ruta; y a los administradores supervisar la flota, tarifas y validaciones estudiantiles.
 
 ---
 
@@ -10,147 +10,217 @@ La arquitectura está dividida en tres capas desacopladas que se comunican media
 
 ```text
   [ CLIENTE / FRONTEND ]                [ SERVIDOR / BACKEND ]               [ BASE DE DATOS ]
-       Next.js (React)                      NestJS (Node.js)               PostgreSQL (Supabase)
-    http://localhost:3000                 http://localhost:3001                Nube (Puerto 5432)
+       Next.js (React)                      NestJS (Node.js)                PostgreSQL (Docker local)
+    http://localhost:3000                 http://localhost:3001                 127.0.0.1:5433
               │                                    │                                    │
               │  HTTP REST / JSON                  │  Pool SQL ('pg')                   │
-              │  credentials: 'include'            │  Conexión cifrada SSL              │
+              │  credentials: 'include'            │  Sesión en PostgreSQL              │
               └───────────────────────────────────►│───────────────────────────────────►│
                                                    │                                    │
                                                    │◄───────────────────────────────────┘
               │◄───────────────────────────────────┘
 ```
 
-### Tecnologías y Herramientas Utilizadas
-* **NestJS 11:** Framework de Node.js modular y tipado con TypeScript.
-* **PostgreSQL 17 en Supabase:** Base de datos relacional alojada en la nube con soporte SSL, evitando la dependencia obligatoria de Docker local.
-* **`pg` (node-postgres):** Controlador nativo con Connection Pool para transacciones SQL de alto rendimiento.
-* **`express-session` + `connect-pg-simple`:** Autenticación por sesiones con almacenamiento persistente de cookies en PostgreSQL.
-* **`bcryptjs`:** Algoritmo de hashing criptográfico unidireccional para proteger las contraseñas de los usuarios.
-* **`class-validator` y `class-transformer`:** Validación estricta en tiempo de ejecución de las peticiones HTTP mediante Data Transfer Objects (DTOs).
+### Tecnologías y herramientas
+
+* **Next.js 15 + React 19:** Frontend con App Router, rutas por rol y consumo de API con `fetch`.
+* **NestJS 11 + TypeScript:** Backend modular con `ValidationPipe` global (`whitelist`, `forbidNonWhitelisted`, `transform`).
+* **PostgreSQL 17 (Docker):** Base de datos local por defecto, inicializada con `database/01_init.sql`.
+* **`pg` (node-postgres):** Acceso SQL con pool de conexiones; SSL condicional para compatibilidad con proveedores administrados.
+* **`express-session` + `connect-pg-simple`:** Sesiones persistidas en PostgreSQL (cookie `micros.sid`, `httpOnly`, `sameSite=lax`).
+* **`bcryptjs`:** Hash de contraseñas.
+* **`class-validator` y `class-transformer`:** Validación de DTOs en tiempo de ejecución.
+
+### Ejecución local (configuración por defecto)
+
+* **Base de datos:** contenedor Docker PostgreSQL (`compose.yaml`).
+* **Backend y frontend:** ejecutados localmente con npm.
+* **Alternativa compatible:** se puede usar otra instancia PostgreSQL (incluido un proveedor administrado) configurando `DATABASE_URL` en `backend/.env`; si la URL requiere SSL, el backend habilita SSL automáticamente.
 
 ---
 
 ## 2. Credenciales y Configuración de Acceso
 
-### Usuario Administrador Inicial
-* **Usuario:** `admin`
-* **Contraseña:** `Admin12`
+### Usuario administrador inicial
+
+El script `database/01_init.sql` crea un usuario administrador inicial usando las variables de entorno definidas al inicializar la base de datos:
+
+* **Usuario:** valor de `ADMIN_USERNAME` (por defecto `admin` en `.env.example`)
+* **Contraseña:** valor de `ADMIN_PASSWORD` (definir una contraseña segura en tu `.env`)
 * **Rol:** `ADMIN`
 
-### Usuarios Regulares (Pasajeros y Conductores)
-Los usuarios se registran a través del endpoint `POST /api/auth/register`.
-* **Estudiantes Universitarios:** Al registrarse como `UNIVERSITARIO`, deben ingresar un correo con dominio `@upds.edu.bo` y su código estudiantil (`codEst`).
-* **Estudiantes Escolares:** Al registrarse como `ESCOLAR`, deben ingresar su código `RUDE`.
-* **Conductores:** Al registrarse con rol `CONDUCTOR`, tienen permisos para actualizar el GPS y registrar la subida/bajada de pasajeros.
+> No uses contraseñas de ejemplo en entornos compartidos. Define credenciales propias en los archivos `.env` locales, que no deben commitearse.
 
-### Variables de Entorno (`backend/.env`)
+### Registro de usuarios
+
+Los usuarios se registran desde `POST /api/auth/register` o desde la pantalla `/registro`.
+
+* **PASAJERO:** categoría `GENERAL`, `ESCOLAR`, `UNIVERSITARIO` o `ADULTO_MAYOR`.
+* **UNIVERSITARIO:** requiere correo institucional `@upds.edu.bo` y `codEst`.
+* **ESCOLAR:** requiere `codigoRude`.
+* **CONDUCTOR:** se registra con rol `CONDUCTOR`; su cuenta puede requerir validación administrativa según flujo de negocio.
+* **Validación estudiantil:** un ADMIN aprueba/rechaza con `PATCH /api/auth/validar-estudiante/:id`.
+
+### Variables de entorno
+
+Usa archivos de ejemplo y completa valores locales:
+
+```bash
+# Raíz (Docker PostgreSQL)
+Copy-Item .env.example .env
+
+# Backend
+Copy-Item backend/.env.example backend/.env
+
+# Frontend
+Copy-Item frontend/.env.local.example frontend/.env.local
+```
+
+**`.env` (raíz, usado por Docker Compose):**
+
+```env
+POSTGRES_PASSWORD=<contraseña_segura_postgres>
+```
+
+**`backend/.env`:**
+
 ```env
 PORT=3001
 FRONTEND_ORIGIN=http://localhost:3000
-DATABASE_URL="postgresql://postgres:Rutabol12345¿@db.mxnofnbhxzxhmyzcawlz.supabase.co:5432/postgres"
-SESSION_SECRET=rutabol_secret_desarrollo_scz_2026_super_seguro
+DATABASE_URL=postgresql://micros:<contraseña_segura_postgres>@localhost:5433/micros_scz
+SESSION_SECRET=<secreto_aleatorio_de_al_menos_32_caracteres>
 ADMIN_USERNAME=admin
-ADMIN_PASSWORD=Admin12
+ADMIN_PASSWORD=<contraseña_segura_admin>
 ```
+
+**`frontend/.env.local`:**
+
+```env
+NEXT_PUBLIC_API_URL=http://localhost:3001/api
+```
+
+> Importante: `SESSION_SECRET` debe tener al menos 32 caracteres. No publiques credenciales reales, cadenas de conexión privadas ni secretos en documentación o commits.
 
 ---
 
 ## 3. Lo que se Realizó en el Backend y Base de Datos
 
-### A. Base de Datos Relacional (`database/01_init.sql`)
-1. **`lineas`:** Almacena las rutas troncales de Santa Cruz (Línea 17, Línea 18, Línea 72, Línea 8) con sus colores y descripciones.
-2. **`usuarios`:** Gestiona los roles (`ADMIN`, `CONDUCTOR`, `PASAJERO`), categorías de descuento y datos estudiantiles.
-3. **`tarifas`:** Fija los precios oficiales para evitar cobros arbitrarios (General: Bs. 2.00, Universitario: Bs. 1.00, Escolar: Bs. 1.00, Adulto Mayor: Bs. 1.50).
-4. **`micros`:** Almacena placa, número interno, coordenadas de geolocalización (`latitud`, `longitud`), y aplica restricciones de integridad:
+### A. Base de datos relacional (`database/01_init.sql`)
+
+1. **`lineas`:** rutas troncales (incluye líneas de ejemplo) con nombre, zona, descripción y color.
+2. **`usuarios`:** cuentas con rol (`ADMIN`, `CONDUCTOR`, `PASAJERO`), categoría, datos estudiantiles y estado de validación.
+3. **`tarifas`:** precios oficiales por categoría (General, Universitario, Escolar, Adulto Mayor).
+4. **`micros`:** placa, interno, capacidad, ocupación, estado, línea y coordenadas GPS. Restricciones de integridad:
    * `CHECK (capacidad BETWEEN 18 AND 25)`
    * `CHECK (pasajeros_actuales <= capacidad)`
-5. **`pagos`:** Almacena los tickets emitidos, montos y métodos de pago. No almacena números de tarjeta completos por seguridad.
-6. **`trasbordos`:** Registra las transferencias de pasajeros entre unidades por cambio de turno o emergencias mecánicas.
-7. **`notificaciones`:** Sistema de alertas para pasajeros y administradores.
+5. **`pagos`:** tickets emitidos, monto, método enmascarado, estado y marca de trasbordo gratuito. No guarda número completo de tarjeta ni CVV.
+6. **`trasbordos`:** transferencias entre micro origen y destino, motivo, cantidad y fecha.
+7. **`notificaciones`:** avisos con tipo (`INFO`, `EMERGENCIA`, `TRASBORDO`) y estado de lectura.
+8. **`session`:** almacenamiento de sesiones de Express para autenticación persistente.
 
-### B. Módulos y Lógica de Negocio en NestJS
-* **Búsqueda Geoespacial a 5 km:** Implementada en `MicrosService` con la **Fórmula Haversine** ejecutada directamente en SQL, filtrando únicamente los micros activos cuya distancia es $\le 5\text{ km}$ desde la ubicación del usuario.
-* **Control de Capacidad:** El endpoint de pasajeros valida que la suma de pasajeros a bordo nunca exceda el límite autorizado del micro (entre 18 y 25).
-* **Garantía de No Doble Cobro en Trasbordos:** Al procesar un pago, el servicio verifica si el pasajero cuenta con un boleto emitido dentro de las últimas 2 horas en un micro que haya registrado un trasbordo hacia la unidad actual. Si califica, el monto cobrado es **Bs. 0.00**.
-* **Pasarela de Pagos Segura:** Procesa transacciones de tarjeta validando la estructura del plástico sin guardar números sensibles ni CVV en la base de datos, emitiendo un código de ticket único.
+### B. Módulos y lógica de negocio en NestJS
+
+* **Autenticación y sesiones:** registro/login/logout/me; sesión guardada en PostgreSQL; guards por rol (`SessionGuard`, `AdminGuard`, `ConductorOrAdminGuard`).
+* **Búsqueda geoespacial:** `GET /api/micros/cercanos` usa fórmula Haversine en SQL con radio configurable (por defecto 5 km).
+* **Control de capacidad:** validación DTO + reglas de servicio + checks SQL para impedir sobrecupo.
+* **Trasbordo gratuito:** si el usuario tiene pago reciente en micro origen y existe trasbordo al micro destino dentro de la ventana de 2 horas, el pago se registra con `monto 0.00` y `es_trasbordo_gratuito=true`.
+* **Pagos seguros:** se valida la estructura de pago, se genera ticket único y solo se persiste información no sensible (por ejemplo, método/tarjeta enmascarada).
+* **Validación estudiantil:** reglas por categoría; administración puede aprobar o rechazar credenciales.
+
+### C. Frontend por rutas y rol
+
+* **`/` (público):** líneas, micros, búsqueda de cercanos por lat/lng o geolocalización, accesos a login/registro.
+* **`/login`:** inicio de sesión y redirección por rol.
+* **`/registro`:** registro con campos dinámicos por categoría/rol.
+* **`/pasajero`:** cercanos, pago de boleto, mis pagos, verificación de ticket, notificaciones.
+* **`/conductor` (CONDUCTOR/ADMIN):** operación de micro (subir/bajar pasajeros, GPS), verificación de ticket, creación/listado de trasbordos, notificaciones.
+* **`/admin`:** CRUD micros, actualización de tarifas, validación de estudiantes, trasbordos y notificaciones.
 
 ---
 
 ## 4. Guía Detallada para el Desarrollador Frontend (Next.js)
 
-Para consumir la API desde Next.js, toda petición `fetch` debe apuntar a `http://localhost:3001/api` e incluir `credentials: 'include'` para que el navegador envíe la cookie de sesión automáticamente.
+### Configuración de consumo API
+
+Toda petición `fetch` debe apuntar a `NEXT_PUBLIC_API_URL` (por defecto `http://localhost:3001/api`) e incluir `credentials: 'include'` para enviar la cookie de sesión.
 
 ```typescript
-// Ejemplo de configuración de llamada
-const res = await fetch('http://localhost:3001/api/auth/me', {
-  credentials: 'include'
+const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+
+const res = await fetch(`${BASE}/auth/me`, {
+  credentials: 'include',
+  cache: 'no-store',
 });
 ```
 
-### Catálogo de Endpoints
+### Matriz de endpoints y permisos
 
-#### 1. Autenticación (`/api/auth`)
-| Método | Endpoint | Descripción | Body (JSON) |
+| Método | Endpoint | Acceso | Descripción |
 |---|---|---|---|
-| `POST` | `/api/auth/register` | Registrar nuevo usuario | `{ "username": "...", "password": "...", "nombreCompleto": "...", "categoria": "UNIVERSITARIO", "codEst": "...", "emailUpds": "...@upds.edu.bo" }` |
-| `POST` | `/api/auth/login` | Iniciar sesión y fijar cookie | `{ "username": "admin", "password": "Admin12" }` |
-| `GET` | `/api/auth/me` | Obtener datos del usuario activo | Ninguno |
-| `POST` | `/api/auth/logout` | Cerrar sesión y limpiar cookie | Ninguno |
-| `PATCH` | `/api/auth/validar-estudiante/:id` | Validar credencial (Solo Admin) | `{ "aprobado": true }` |
+| `POST` | `/api/auth/register` | Público | Registro de usuario |
+| `POST` | `/api/auth/login` | Público | Inicia sesión y crea cookie |
+| `GET` | `/api/auth/me` | Sesión | Usuario autenticado actual |
+| `POST` | `/api/auth/logout` | Sesión | Cierra sesión |
+| `GET` | `/api/auth/pendientes` | ADMIN | Lista estudiantes pendientes de validación |
+| `PATCH` | `/api/auth/validar-estudiante/:id` | ADMIN | Aprueba/rechaza validación estudiantil |
+| `GET` | `/api/lineas` | Público | Lista líneas |
+| `GET` | `/api/lineas/:id` | Público | Detalle de línea |
+| `GET` | `/api/micros` | Público | Lista micros |
+| `GET` | `/api/micros/:id` | Público | Detalle de micro |
+| `GET` | `/api/micros/cercanos?lat=&lng=&radio=` | Público | Micros cercanos por Haversine |
+| `POST` | `/api/micros` | ADMIN | Crea micro |
+| `PATCH` | `/api/micros/:id` | ADMIN | Actualiza micro |
+| `DELETE` | `/api/micros/:id` | ADMIN | Elimina micro |
+| `PATCH` | `/api/micros/:id/pasajeros` | CONDUCTOR o ADMIN | Sube/baja pasajeros |
+| `PATCH` | `/api/micros/:id/ubicacion` | CONDUCTOR o ADMIN | Actualiza GPS |
+| `GET` | `/api/tarifas` | Público | Lista tarifas |
+| `PATCH` | `/api/tarifas/:id` | ADMIN | Actualiza monto de tarifa |
+| `POST` | `/api/pagos/pagar` | Sesión | Procesa pago y genera ticket |
+| `GET` | `/api/pagos/mis-pagos` | Sesión | Historial de pagos del usuario |
+| `GET` | `/api/pagos/verificar/:codigoTicket` | Público | Verifica ticket |
+| `POST` | `/api/trasbordos` | CONDUCTOR o ADMIN | Crea trasbordo |
+| `GET` | `/api/trasbordos` | CONDUCTOR o ADMIN | Lista trasbordos |
+| `GET` | `/api/notificaciones` | Sesión | Lista notificaciones |
+| `PATCH` | `/api/notificaciones/:id/leido` | Sesión | Marca notificación como leída |
 
-#### 2. Líneas y Micros (`/api/lineas` y `/api/micros`)
-| Método | Endpoint | Descripción | Parámetros / Body |
-|---|---|---|---|
-| `GET` | `/api/lineas` | Catálogo público de líneas | Ninguno |
-| `GET` | `/api/lineas/:id` | Detalle de una línea | ID en ruta |
-| `GET` | `/api/micros` | Listado general de micros | Ninguno |
-| `GET` | `/api/micros/cercanos` | Micros a menos de 5 km | Query: `?lat=-17.7833&lng=-63.1821&radio=5` |
-| `PATCH`| `/api/micros/:id/pasajeros` | Subir o bajar pasajeros | `{ "accion": "SUBIR", "cantidad": 2 }` |
-| `PATCH`| `/api/micros/:id/ubicacion` | Actualizar GPS del micro | `{ "latitud": -17.7850, "longitud": -63.1810 }` |
-| `POST` | `/api/micros` | Crear micro (Solo Admin) | `{ "placa": "3045-XYZ", "interno": "17-01", "capacidad": 22, "lineaId": 1 }` |
+### Contratos relevantes (resumen)
 
-#### 3. Tarifas (`/api/tarifas`)
-| Método | Endpoint | Descripción |
-|---|---|---|
-| `GET` | `/api/tarifas` | Devuelve tarifas oficiales (General, Universitario, Escolar, Adulto Mayor) |
-| `PATCH`| `/api/tarifas/:id` | Modificar tarifa oficial (Solo Admin) |
+* **Registro:** `username`, `password`, `nombreCompleto?`, `rol?`, `categoria?`, `codigoRude?`, `codEst?`, `emailUpds?`, `fotoCredencialUrl?`
+* **Pago:** `microId`, `numeroTarjeta`, `nombreTitular`, `fechaVencimiento`, `cvv`
+* **Pasajeros:** `accion` (`SUBIR`/`BAJAR`), `cantidad`
+* **Ubicación:** `latitud`, `longitud`
+* **Trasbordo:** `microOrigenId`, `microDestinoId`, `motivo`, `cantidadPasajeros?`
 
-#### 4. Pagos y Boletos (`/api/pagos`)
-| Método | Endpoint | Descripción | Body (JSON) |
-|---|---|---|---|
-| `POST` | `/api/pagos/pagar` | Procesar pago con tarjeta | `{ "microId": 1, "numeroTarjeta": "4500123456789012", "nombreTitular": "...", "fechaVencimiento": "12/28", "cvv": "123" }` |
-| `GET` | `/api/pagos/mis-pagos` | Historial de pagos del usuario | Ninguno (Usa la sesión) |
-| `GET` | `/api/pagos/verificar/:codigoTicket` | Chofer valida boleto del pasajero | Código de ticket en la ruta |
+### Manejo esperado en UI
 
-#### 5. Trasbordos y Notificaciones (`/api/trasbordos` y `/api/notificaciones`)
-| Método | Endpoint | Descripción | Body (JSON) |
-|---|---|---|---|
-| `POST` | `/api/trasbordos` | Realizar trasbordo de pasajeros | `{ "microOrigenId": 1, "microDestinoId": 2, "motivo": "FALLA_MECANICA" }` |
-| `GET` | `/api/trasbordos` | Historial de trasbordos | Ninguno |
-| `GET` | `/api/notificaciones` | Lista de avisos y emergencias | Ninguno |
-| `PATCH`| `/api/notificaciones/:id/leido` | Marcar aviso como leído | ID en ruta |
+* Mostrar estados `loading`, `error`, `empty` y `success`.
+* En `401/403`, mostrar mensaje claro y redirigir a `/login` cuando corresponda.
+* Ocultar acciones no autorizadas en la UI, pero asumir que el backend es la autoridad final.
 
 ---
 
 ## 5. Guía de Defensa para el Examen con el Ingeniero
 
-Para explicar con solvencia el funcionamiento del sistema ante el docente:
+### 1. ¿Cómo se conectan Frontend, Backend y Base de Datos?
 
-### 1. ¿Cómo se conectan el Frontend, Backend y Base de Datos?
-> *"El frontend en Next.js no se conecta directamente a la base de datos por seguridad. El navegador hace peticiones HTTP REST en formato JSON a nuestro servidor NestJS (puerto 3001). NestJS valida la sesión mediante cookies seguras (`connect-pg-simple`) y ejecuta consultas SQL nativas con `pg.Pool` hacia nuestra base de datos PostgreSQL alojada en Supabase bajo conexión cifrada SSL."*
+> "El frontend en Next.js consume la API REST de NestJS en `http://localhost:3001/api` usando JSON y `credentials: 'include'`. NestJS valida datos con DTOs, controla acceso por sesión/rol y ejecuta SQL parametrizado mediante `pg` hacia PostgreSQL. En desarrollo local, PostgreSQL corre en Docker; el backend y frontend corren localmente con npm."
 
-### 2. ¿Cómo resolvieron la persistencia si no tenían Docker instalado?
-> *"Para garantizar la alta disponibilidad y evitar depender de Docker en local, desplegamos la base de datos PostgreSQL en Supabase. Configuramos el Connection Pool en NestJS con soporte SSL (`rejectUnauthorized: false`), lo que permite que el backend mantenga la persistencia en la nube 24/7."*
+### 2. ¿Por qué Docker para la base de datos y apps locales?
 
-### 3. ¿Cómo funciona la búsqueda de micros a 5 km (Haversine)?
-> *"En lugar de descargar todos los micros a la memoria de Node.js y calcular distancias en JavaScript, delegamos el cálculo directamente al motor PostgreSQL mediante la fórmula trigonométrica de Haversine dentro de la cláusula WHERE. Esto permite filtrar en milisegundos los vehículos que están dentro del radio de 5 km respecto a la latitud y longitud enviadas por el usuario."*
+> "Docker nos da un PostgreSQL reproducible con inicialización automática del esquema (`01_init.sql`). Separar DB en contenedor y apps en local simplifica el desarrollo: se reinicia rápido, no depende de instalación manual compleja de PostgreSQL y mantiene la misma configuración para el equipo."
 
-### 4. ¿Cómo controlan que el micro no supere su capacidad autorizada?
-> *"Aplicamos una doble validación: a nivel de base de datos tenemos un `CHECK (capacidad BETWEEN 18 AND 25)` y un `CHECK (pasajeros_actuales <= capacidad)`. A nivel de backend, el servicio `MicrosService` verifica que si `pasajeros_actuales + cantidad > capacidad`, arroje una excepción HTTP `400 Bad Request` indicando el espacio disponible restante."*
+### 3. ¿Cómo funciona la búsqueda de micros a 5 km?
 
-### 5. ¿Cómo garantizan que el pasajero no pague doble en un trasbordo?
-> *"Cuando un micro registra un trasbordo hacia otra unidad (sea por cambio de turno o emergencia mecánica), queda registrado en la tabla `trasbordos`. Al procesar un pago en la unidad de destino, el backend busca si el usuario tiene un pago reciente en el micro de origen. Si existe un trasbordo vinculado, el sistema emite el boleto con un monto de Bs. 0.00 y marca `es_trasbordo_gratuito = true`."*
+> "Usamos la fórmula de Haversine dentro de la consulta SQL. El backend recibe latitud, longitud y radio; la base filtra micros activos dentro del radio y devuelve la distancia calculada. Así evitamos traer todos los registros a memoria y aprovechamos el motor de BD."
 
-### 6. ¿Cómo cumplen con la seguridad en los pagos con tarjeta?
-> *"Cumplimos con las normas de seguridad evitando almacenar números de tarjeta completos o códigos CVV en las tablas. El sistema procesa la transacción simulando una pasarela certificada y solo persiste el identificador de boleto, los últimos 4 dígitos y el estado del cobro."*
+### 4. ¿Cómo se controla la capacidad del micro?
+
+> "Hay validación en capas: DTOs y servicio en backend rechazan operaciones inválidas, y la base tiene constraints `CHECK` para capacidad entre 18 y 25 y para impedir que `pasajeros_actuales` supere la capacidad. Si se excede, se responde con error HTTP adecuado."
+
+### 5. ¿Cómo se evita el doble cobro en trasbordos?
+
+> "Antes de cobrar, el servicio de pagos verifica si existe un pago reciente del mismo usuario en el micro origen y un trasbordo válido hacia el micro destino dentro de la ventana de 2 horas. Si aplica, emite ticket con monto Bs. 0.00 y marca `es_trasbordo_gratuito=true`."
+
+### 6. ¿Cómo se manejan seguridad y credenciales?
+
+> "Las contraseñas se almacenan con hash (`bcryptjs`), la autenticación usa sesiones HTTP-only en PostgreSQL y los endpoints sensibles tienen guards por rol. En pagos no se persiste número completo de tarjeta ni CVV. La documentación usa placeholders `.env.example`; los secretos reales solo van en archivos `.env` locales ignorados por git."
