@@ -1,0 +1,55 @@
+import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Req, Res, UnauthorizedException, UseGuards } from '@nestjs/common';
+import type { Request, Response } from 'express';
+import { AuthService } from './auth.service';
+import { LoginDto } from './dto/login.dto';
+import { RegisterDto } from './dto/register.dto';
+import { AdminGuard } from './session.guard';
+
+@Controller('auth')
+export class AuthController {
+  constructor(private readonly auth: AuthService) {}
+
+  @Post('register')
+  async register(@Body() dto: RegisterDto) {
+    return this.auth.register(dto);
+  }
+
+  @Post('login')
+  async login(@Body() dto: LoginDto, @Req() req: Request) {
+    const usuario = await this.auth.validar(dto.username, dto.password);
+    await new Promise<void>((resolve, reject) => req.session.regenerate(err => err ? reject(err) : resolve()));
+    req.session.usuarioId = usuario.id;
+    req.session.username = usuario.username;
+    req.session.rol = usuario.rol;
+    req.session.categoria = usuario.categoria;
+    await new Promise<void>((resolve, reject) => req.session.save(err => err ? reject(err) : resolve()));
+    return usuario;
+  }
+
+  @Get('me')
+  me(@Req() req: Request) {
+    if (!req.session?.usuarioId) throw new UnauthorizedException('No existe sesión activa');
+    return {
+      id: req.session.usuarioId,
+      username: req.session.username,
+      rol: req.session.rol,
+      categoria: req.session.categoria
+    };
+  }
+
+  @Post('logout')
+  async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    await new Promise<void>((resolve, reject) => req.session.destroy(err => err ? reject(err) : resolve()));
+    res.clearCookie('micros.sid', { path: '/', httpOnly: true, sameSite: 'lax', secure: false });
+    return { mensaje: 'Sesión finalizada' };
+  }
+
+  @Patch('validar-estudiante/:id')
+  @UseGuards(AdminGuard)
+  validarEstudiante(
+    @Param('id', ParseIntPipe) id: number,
+    @Body('aprobado') aprobado: boolean = true
+  ) {
+    return this.auth.validarEstudiante(id, aprobado);
+  }
+}
