@@ -11,7 +11,7 @@ export interface Usuario {
   estudianteValidado?: boolean;
 }
 
-export interface Linea { id: number; nombre: string; zona: string; descripcion: string; color: string; }
+export interface Linea { id: number; numero: string; nombre: string; zona: string; descripcion: string; color: string; }
 export interface Micro {
   id: number; placa: string; interno: string; capacidad: number; pasajerosActuales: number;
   estado: EstadoMicro; lineaId: number; latitud: number; longitud: number; distanciaKm?: number;

@@ -32,6 +32,8 @@ export const api = {
   validarEstudiante: (id: number, aprobado: boolean) => request<{ mensaje: string }>(`/auth/validar-estudiante/${id}`, { method: 'PATCH', body: JSON.stringify({ aprobado }) }),
 
   lineas: () => request<Linea[]>('/lineas'),
+  crearLinea: (data: { numero: string; nombre: string; zona: string; descripcion: string; color?: string }) => request<Linea>('/lineas', { method: 'POST', body: JSON.stringify(data) }),
+  actualizarLinea: (id: number, data: { numero?: string; nombre?: string; zona?: string; descripcion?: string; color?: string }) => request<Linea>(`/lineas/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   micros: () => request<Micro[]>('/micros'),
   microsCercanos: (lat: number, lng: number, radio = 5) => request<Micro[]>(`/micros/cercanos?lat=${lat}&lng=${lng}&radio=${radio}`),
   crearMicro: (data: MicroInput) => request<Micro>('/micros', { method: 'POST', body: JSON.stringify(data) }),
