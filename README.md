@@ -43,11 +43,12 @@ La arquitectura está dividida en tres capas desacopladas que se comunican media
 
 ### Usuario administrador inicial
 
-El script `database/01_init.sql` crea un usuario administrador inicial usando las variables de entorno definidas al inicializar la base de datos:
+El backend NestJS realiza el bootstrap del administrador al iniciar (`AuthService.onModuleInit`), leyendo `ADMIN_USERNAME` y `ADMIN_PASSWORD` desde `backend/.env`:
 
-* **Usuario:** valor de `ADMIN_USERNAME` (por defecto `admin` en `.env.example`)
-* **Contraseña:** valor de `ADMIN_PASSWORD` (definir una contraseña segura en tu `.env`)
+* **Usuario:** valor de `ADMIN_USERNAME`
+* **Contraseña:** valor de `ADMIN_PASSWORD` (define una contraseña segura en tu `.env`)
 * **Rol:** `ADMIN`
+* **Comportamiento actual:** si el usuario no existe, lo crea; si ya existe, sincroniza el `password_hash` con el valor configurado al arrancar.
 
 > No uses contraseñas de ejemplo en entornos compartidos. Define credenciales propias en los archivos `.env` locales, que no deben commitearse.
 
